@@ -1,5 +1,5 @@
 import os
-import psycopg2
+import psycopg2 
 import boto3
 from datetime import datetime, timedelta
 
