@@ -96,7 +96,7 @@ def send_email_notification(email, warranty_expires, user_name, asset_name, expi
 
     user_greeting_name = user_name if user_name and user_name.strip() else "Usuário(a)"
     
-    asset_display_name = asset_name if asset_name and asset_name.strip() else "Ativo" # "Ativo" como fallback
+    asset_display_name = asset_name if asset_name and asset_name.strip() else "Ativo" 
 
     formatted_warranty_expires = warranty_expires.strftime('%d/%m/%Y')
 
