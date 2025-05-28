@@ -1,5 +1,5 @@
 import os
-import psycopg2 
+import psycopg2
 import boto3
 from datetime import datetime, timedelta
 
@@ -30,35 +30,51 @@ def lambda_handler(event, context):
         today = datetime.utcnow().date()
         limit_date = today + timedelta(days=30)
 
-        # Consulta para próximos do vencimento
         query_upcoming = """
-            SELECT aa.user_id, u.email, a.warranty_expires
+            SELECT u.nome AS user_name, 
+                   u.email, 
+                   a.model AS asset_name,
+                   a.warrantyexpires
             FROM asset_assignment aa
-            JOIN ativos a ON aa.asset_id = a.id
+            JOIN ativos a ON aa.active_id = a.id 
             JOIN users u ON aa.user_id = u.id
-            WHERE aa.is_active = TRUE AND a.warranty_expires BETWEEN %s AND %s;
+            WHERE aa.isactive = TRUE AND a.warrantyexpires BETWEEN %s AND %s;
         """
 
         cursor.execute(query_upcoming, (today, limit_date))
         upcoming_results = cursor.fetchall()
 
-        for user_id, email, warranty_expires in upcoming_results:
-            send_email_notification(email, warranty_expires, expired=False)
+        for user_name, email, asset_name, warranty_expires in upcoming_results:
+            send_email_notification(
+                email=email,
+                warranty_expires=warranty_expires,
+                user_name=user_name,
+                asset_name=asset_name,
+                expired=False
+            )
 
-        # Consulta para expirados
         query_expired = """
-            SELECT aa.user_id, u.email, a.warranty_expires
+            SELECT u.nome AS user_name, 
+                   u.email, 
+                   a.model AS asset_name,
+                   a.warrantyexpires
             FROM asset_assignment aa
-            JOIN ativos a ON aa.asset_id = a.id
+            JOIN ativos a ON aa.active_id = a.id
             JOIN users u ON aa.user_id = u.id
-            WHERE aa.is_active = TRUE AND a.warranty_expires < %s;
+            WHERE aa.isactive = TRUE AND a.warrantyexpires < %s;
         """
 
         cursor.execute(query_expired, (today,))
         expired_results = cursor.fetchall()
 
-        for user_id, email, warranty_expires in expired_results:
-            send_email_notification(email, warranty_expires, expired=True)
+        for user_name, email, asset_name, warranty_expires in expired_results:
+            send_email_notification(
+                email=email,
+                warranty_expires=warranty_expires,
+                user_name=user_name,
+                asset_name=asset_name,
+                expired=True
+            )
 
         cursor.close()
         conn.close()
@@ -70,32 +86,43 @@ def lambda_handler(event, context):
 
     except Exception as e:
         print(f"Erro: {e}")
+
         return {
             'statusCode': 500,
-            'body': str(e)
+            'body': f'Erro ao processar notificações: {str(e)}'
         }
 
-def send_email_notification(email, warranty_expires, expired=False):
+def send_email_notification(email, warranty_expires, user_name, asset_name, expired=False):
+
+    user_greeting_name = user_name if user_name and user_name.strip() else "Usuário(a)"
+    
+    asset_display_name = asset_name if asset_name and asset_name.strip() else "Ativo" # "Ativo" como fallback
+
+    formatted_warranty_expires = warranty_expires.strftime('%d/%m/%Y')
+
     if expired:
-        subject = "Alerta: Seu Ativo Expirou"
-        body_text = (f"Olá,\n\n"
-                     f"Seu ativo expirou em {warranty_expires}.\n"
-                     f"Por favor, regularize a situação.\n\n"
+        subject = f"Alerta: O seu ativo {asset_display_name} Expirou"
+        body_text = (f"Olá {user_greeting_name},\n\n"
+                     f"O seu ativo {asset_display_name.lower()} expirou em {formatted_warranty_expires}.\n"
+                     f"Por favor, verifique a situação e tome as providências necessárias.\n\n"
                      f"Atenciosamente,\nEquipe de TI.")
     else:
         dias_restantes = (warranty_expires - datetime.utcnow().date()).days
-        subject = "Aviso: Seu Ativo está Próximo de Vencer"
-        body_text = (f"Olá,\n\n"
-                     f"O seu ativo irá expirar em {dias_restantes} dias (em {warranty_expires}).\n"
+        subject = f"Alerta: O seu ativo {asset_display_name} esta Próximo de Vencer"
+        body_text = (f"Olá {user_greeting_name},\n\n"
+                     f"O seu ativo {asset_display_name.lower()} irá expirar em {dias_restantes} dias (data de vencimento: {formatted_warranty_expires}).\n"
                      f"Por favor, tome as providências necessárias.\n\n"
                      f"Atenciosamente,\nEquipe de TI.")
 
-    response = ses_client.send_email(
-        Source=SENDER_EMAIL,
-        Destination={'ToAddresses': [email]},
-        Message={
-            'Subject': {'Data': subject},
-            'Body': {'Text': {'Data': body_text}}
-        }
-    )
-    print(f"E-mail enviado para {email}: {response['MessageId']}")
+    try:
+        response = ses_client.send_email(
+            Source=SENDER_EMAIL,
+            Destination={'ToAddresses': [email]},
+            Message={
+                'Subject': {'Data': subject},
+                'Body': {'Text': {'Data': body_text}}
+            }
+        )
+        print(f"E-mail enviado para {email} (Assunto: {subject}): {response['MessageId']}")
+    except Exception as e:
+        print(f"Erro ao enviar e-mail para {email}: {str(e)}")
